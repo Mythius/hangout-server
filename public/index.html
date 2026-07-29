@@ -3,32 +3,117 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Website</title>
-
-    <script src="api.js"></script>
-    <script src="https://accounts.google.com/gsi/client"></script>
+    <title>Hangout</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --accent: #ff6f3c;
+        --accent-dark: #c1461a;
+        --bg: #fff6f2;
+        --card: #ffffff;
+        --text: #2a1c16;
+        --muted: #7a6a62;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1512;
+          --card: #2a201b;
+          --text: #f6ece6;
+          --muted: #b5a49b;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      .card {
+        width: 100%;
+        max-width: 420px;
+        background: var(--card);
+        border-radius: 24px;
+        padding: 40px 32px;
+        text-align: center;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+      }
+      .icon {
+        width: 72px;
+        height: 72px;
+        margin: 0 auto 20px;
+        border-radius: 50%;
+        background: color-mix(in srgb, var(--accent) 18%, transparent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 32px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+      }
+      p.tagline {
+        margin: 0 0 32px;
+        color: var(--muted);
+        font-size: 16px;
+      }
+      .downloads {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 14px 20px;
+        border-radius: 14px;
+        font-size: 16px;
+        font-weight: 600;
+        text-decoration: none;
+        transition: opacity 0.15s ease;
+      }
+      .btn:active {
+        opacity: 0.8;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+      .btn-disabled {
+        background: transparent;
+        color: var(--muted);
+        border: 1.5px solid color-mix(in srgb, var(--muted) 35%, transparent);
+        cursor: default;
+      }
+      .note {
+        margin-top: 24px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+    </style>
   </head>
   <body>
-    <p><a href="/app-debug.apk" download>Download Hangout (Android debug APK)</a></p>
-    <p></p>
-    <button onclick="googleOAuth()">Google Auth</button>
-    <button onclick="microsoftOAuth()">Microsoft Auth</button>
-    <button onclick="lg()">Logout</button>
-    <script>
-      const $ = (q) => document.querySelector(q);
-
-      async function main() {
-        let data = await request("/user");
-        $("p").innerHTML = `Hello ${data.name}`;
-        await setupPrismaOOP();
-      }
-
-      function lg() {
-        logout();
-        main();
-      }
-
-      main();
-    </script>
+    <div class="card">
+      <div class="icon">🙋</div>
+      <h1>Hangout</h1>
+      <p class="tagline">See which friends are free, right now.</p>
+      <div class="downloads">
+        <!-- Direct APK download for now; swap for the Play Store badge/link once published. -->
+        <a class="btn btn-primary" href="/app-debug.apk" download>⬇ Download for Android</a>
+        <!-- Replace with the App Store link once the app is submitted. -->
+        <span class="btn btn-disabled"> Coming soon to iOS</span>
+      </div>
+      <p class="note">Android install is a direct APK download — you'll need to allow "install unknown apps" for your browser the first time.</p>
+    </div>
   </body>
 </html>
