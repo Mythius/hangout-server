@@ -183,6 +183,29 @@ function checkMicrosoftEnvVars(): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Session minting — shared by every login flow (local, Google, Microsoft,
+// CAS, and any project-specific flow added in api.ts, e.g. a native mobile
+// sign-in that verifies its own credential and just needs a session token).
+// ---------------------------------------------------------------------------
+export async function createSession(
+  c: any,
+  session: Session,
+  identityKey: string,
+): Promise<string> {
+  if (!(identityKey in auth)) {
+    auth[identityKey] = { priv: 0, token: "" };
+  }
+  await store.delete(auth[identityKey].token);
+  const token = md5(new Date().toISOString() + identityKey);
+  session.user = auth[identityKey];
+  auth[identityKey].token = token;
+  await loginCallback(session);
+  await store.set(token, session);
+  setAuthCookie(c, token);
+  return token;
+}
+
+// ---------------------------------------------------------------------------
 // Public auth routes (no authentication required)
 // ---------------------------------------------------------------------------
 export function setupPublicRoutes(app: Hono): void {

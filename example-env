@@ -3,3 +3,10 @@ CAS_CLIENT_ID=default
 CAS_CALLBACK_URL="http://localhost/auth/callback/cas"
 PORT="80"
 DATABASE_URL=postgresql://test:test@db:5432/test_db
+
+# Required for the Hangout mobile app's "Sign in with Google" (POST /auth/mobile/google),
+# and also used by the existing web redirect flow (/auth/google) and google-oneclick.
+# Must be a Google Cloud "Web application" OAuth client ID — the Flutter app is
+# configured with this same ID as its google_sign_in `serverClientId`, which is what
+# makes the ID token it produces verifiable here.
+GOOGLE_CLIENT_ID=

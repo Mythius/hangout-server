@@ -173,7 +173,7 @@ export function createCRUD(
     if (id === null) return c.json({ error: "Invalid ID" }, 400);
     try {
       const where = perm.rowLevelFilter
-        ? { [pkField]: id, ...perm.rowLevelFilter }
+        ? { AND: [{ [pkField]: id }, perm.rowLevelFilter] }
         : { [pkField]: id };
       const item = perm.rowLevelFilter
         ? await model.findFirst({ where })
@@ -257,7 +257,7 @@ export function createCRUD(
       if (validErr) return c.json({ error: validErr }, 403);
       if (perm.rowLevelFilter) {
         const owned = await model.findFirst({
-          where: { [pkField]: id, ...perm.rowLevelFilter },
+          where: { AND: [{ [pkField]: id }, perm.rowLevelFilter] },
         });
         if (!owned) return c.json({ error: "Not found" }, 404);
       }
@@ -282,7 +282,7 @@ export function createCRUD(
     try {
       if (perm.rowLevelFilter) {
         const result = await model.deleteMany({
-          where: { [pkField]: id, ...perm.rowLevelFilter },
+          where: { AND: [{ [pkField]: id }, perm.rowLevelFilter] },
         });
         if (result.count === 0) return c.json({ error: "Not found" }, 404);
       } else {

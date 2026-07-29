@@ -27,12 +27,14 @@ enum FriendshipStatus {
 }
 
 model Friendship {
-  id          Int              @id @default(autoincrement())
-  requesterId Int
-  addresseeId Int
-  status      FriendshipStatus @default(PENDING)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id              Int              @id @default(autoincrement())
+  requesterId     Int
+  addresseeId     Int
+  status          FriendshipStatus @default(PENDING)
+  requesterNotify Boolean          @default(true)
+  addresseeNotify Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   requester User @relation("FriendshipRequester", fields: [requesterId], references: [id])
   addressee User @relation("FriendshipAddressee", fields: [addresseeId], references: [id])
