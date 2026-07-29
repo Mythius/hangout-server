@@ -8,6 +8,10 @@ services:
       - REDIS_URL=redis://redis:6379
     ports:
       - "3000:80"
+    volumes:
+      # Bind-mounted so files (e.g. a built APK) can be dropped in and served
+      # immediately, without needing to rebuild the image.
+      - ./public:/app/public
     depends_on:
       db:
         condition: service_healthy
