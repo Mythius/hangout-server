@@ -19,6 +19,20 @@ async function getOrCreateAppUser(email: string, name: string | undefined) {
   });
 }
 
+// Normalizes phone numbers so "(555) 123-4567", "555-123-4567", and
+// "+15551234567" all match the same stored/looked-up value, regardless of
+// how a friend typed it in. Best-effort (assumes US/Canada when no country
+// code is given) — good enough for matching within a friend group without
+// pulling in a full phone-number-parsing library.
+function normalizePhoneNumber(raw: string): string {
+  const hasPlus = raw.trim().startsWith("+");
+  const digits = raw.replace(/\D/g, "");
+  if (hasPlus) return "+" + digits;
+  if (digits.length === 10) return "+1" + digits;
+  if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
+  return "+" + digits;
+}
+
 function getSessionUserId(c: any): number | null {
   const session = c.get("session") as Session | undefined;
   const userId = session?.db?.userId;
@@ -135,9 +149,13 @@ export function privateRoutes(app: Hono): void {
       if (!phoneNumber || !phoneNumber.trim()) {
         return c.json({ error: "phoneNumber is required" }, 400);
       }
+      const normalized = normalizePhoneNumber(phoneNumber);
+      if (normalized.replace(/\D/g, "").length < 7) {
+        return c.json({ error: "Please enter a valid phone number" }, 400);
+      }
       const user = await prisma.user.update({
         where: { id: userId },
-        data: { phoneNumber: phoneNumber.trim() },
+        data: { phoneNumber: normalized },
       });
       return c.json(serializeUser(user));
     } catch (error) {
@@ -247,7 +265,7 @@ export function privateRoutes(app: Hono): void {
         return c.json({ error: "phoneNumber is required" }, 400);
       }
       const target = await prisma.user.findUnique({
-        where: { phoneNumber: phoneNumber.trim() },
+        where: { phoneNumber: normalizePhoneNumber(phoneNumber) },
       });
       if (!target) {
         return c.json({ error: "No user with that phone number" }, 404);
