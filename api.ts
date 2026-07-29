@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Session } from "./tools/auth.ts";
-import { exposePrismaCRUD } from "./tools/prisma.ts";
+import { exposePrismaCRUD, prisma } from "./tools/prisma.ts";
 import { handleFileUpload } from "./tools/fileUpload.ts";
 
 export function publicRoutes(app: Hono): void {
@@ -25,6 +25,27 @@ export function privateRoutes(app: Hono): void {
     return c.json(
       session.cas_data || session.google_data || session.microsoft_data || {},
     );
+  });
+
+  app.get("/friends/:userId", async (c) => {
+    const userId = Number(c.req.param("userId"));
+    if (!Number.isInteger(userId)) {
+      return c.json({ error: "userId must be an integer" }, 400);
+    }
+
+    const friendships = await prisma.friendship.findMany({
+      where: {
+        status: "ACCEPTED",
+        OR: [{ requesterId: userId }, { addresseeId: userId }],
+      },
+      include: { requester: true, addressee: true },
+    });
+
+    const friends = friendships.map((f) =>
+      f.requesterId === userId ? f.addressee : f.requester,
+    );
+
+    return c.json(friends);
   });
 
   exposePrismaCRUD("api", app);
