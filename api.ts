@@ -34,10 +34,18 @@ function normalizePhoneNumber(raw: string): string {
   return "+" + digits;
 }
 
-// Pushes "<name> is available to hang out!" to every accepted friend who has
-// notifications turned on for this user. Best-effort — errors are logged by
+// Pushes to every accepted friend who has notifications turned on for this
+// user, using their custom availabilityMessage if they've set one (falls
+// back to a sensible default). Best-effort — errors are logged by
 // sendPushNotification itself and never propagate to the caller.
-async function notifyFriendsOfAvailability(userId: number, name: string | null): Promise<void> {
+async function notifyFriendsOfAvailability(
+  userId: number,
+  name: string | null,
+  availabilityMessage: string | null
+): Promise<void> {
+  const body = (availabilityMessage && availabilityMessage.trim())
+    ? availabilityMessage.trim()
+    : `${name ?? "A friend"} is available to hang out!`;
   const friendships = await prisma.friendship.findMany({
     where: { status: "ACCEPTED", OR: [{ requesterId: userId }, { addresseeId: userId }] },
     include: { requester: true, addressee: true },
@@ -47,7 +55,7 @@ async function notifyFriendsOfAvailability(userId: number, name: string | null):
     const friend = iAmRequester ? f.addressee : f.requester;
     const theyWantToBeNotifiedAboutMe = iAmRequester ? f.addresseeNotify : f.requesterNotify;
     if (theyWantToBeNotifiedAboutMe && friend.fcmToken) {
-      await sendPushNotification(friend.fcmToken, "Hangout", `${name ?? "A friend"} is available to hang out!`);
+      await sendPushNotification(friend.fcmToken, "Hangout", body);
     }
   }
 }
@@ -64,6 +72,7 @@ function serializeUser(user: {
   name: string | null;
   phoneNumber: string | null;
   availableForHangout: boolean;
+  availabilityMessage: string | null;
 }) {
   return {
     id: user.id,
@@ -71,6 +80,7 @@ function serializeUser(user: {
     name: user.name,
     phoneNumber: user.phoneNumber,
     availableForHangout: user.availableForHangout,
+    availabilityMessage: user.availabilityMessage,
   };
 }
 
@@ -199,7 +209,7 @@ export function privateRoutes(app: Hono): void {
         data: { availableForHangout: available },
       });
       if (available && !previous?.availableForHangout) {
-        notifyFriendsOfAvailability(userId, user.name).catch((e) =>
+        notifyFriendsOfAvailability(userId, user.name, user.availabilityMessage).catch((e) =>
           console.error("Failed to notify friends of availability:", e)
         );
       }
@@ -222,6 +232,28 @@ export function privateRoutes(app: Hono): void {
       }
       await prisma.user.update({ where: { id: userId }, data: { fcmToken } });
       return c.json({ ok: true });
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return c.json({ error: "Invalid JSON body" }, 400);
+      }
+      return handlePrismaError(c, error);
+    }
+  });
+
+  app.put("/me/availability-message", async (c) => {
+    const userId = getSessionUserId(c);
+    if (!userId) return c.json({ error: "No linked app user" }, 404);
+    try {
+      const { availabilityMessage } = await c.req.json<{ availabilityMessage?: string | null }>();
+      const trimmed = availabilityMessage?.trim() || null;
+      if (trimmed && trimmed.length > 200) {
+        return c.json({ error: "availabilityMessage must be 200 characters or fewer" }, 400);
+      }
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: { availabilityMessage: trimmed },
+      });
+      return c.json(serializeUser(user));
     } catch (error) {
       if (error instanceof SyntaxError) {
         return c.json({ error: "Invalid JSON body" }, 400);
