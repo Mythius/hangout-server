@@ -16,6 +16,7 @@ model User {
   phoneNumber               String?      @unique
   availableForHangout       Boolean      @default(false)
   availableForPublicHangout Boolean      @default(false)
+  fcmToken                  String?
   sentFriendRequests        Friendship[] @relation("FriendshipRequester")
   receivedFriendRequests    Friendship[] @relation("FriendshipAddressee")
 }

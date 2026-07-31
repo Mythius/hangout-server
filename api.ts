@@ -4,6 +4,7 @@ import { createSession } from "./tools/auth.ts";
 import { exposePrismaCRUD, prisma } from "./tools/prisma.ts";
 import { handleFileUpload } from "./tools/fileUpload.ts";
 import { handlePrismaError, PermissionResult } from "./tools/createCRUD.ts";
+import { sendPushNotification } from "./tools/fcm.ts";
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 
@@ -31,6 +32,24 @@ function normalizePhoneNumber(raw: string): string {
   if (digits.length === 10) return "+1" + digits;
   if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
   return "+" + digits;
+}
+
+// Pushes "<name> is available to hang out!" to every accepted friend who has
+// notifications turned on for this user. Best-effort — errors are logged by
+// sendPushNotification itself and never propagate to the caller.
+async function notifyFriendsOfAvailability(userId: number, name: string | null): Promise<void> {
+  const friendships = await prisma.friendship.findMany({
+    where: { status: "ACCEPTED", OR: [{ requesterId: userId }, { addresseeId: userId }] },
+    include: { requester: true, addressee: true },
+  });
+  for (const f of friendships) {
+    const iAmRequester = f.requesterId === userId;
+    const friend = iAmRequester ? f.addressee : f.requester;
+    const theyWantToBeNotifiedAboutMe = iAmRequester ? f.addresseeNotify : f.requesterNotify;
+    if (theyWantToBeNotifiedAboutMe && friend.fcmToken) {
+      await sendPushNotification(friend.fcmToken, "Hangout", `${name ?? "A friend"} is available to hang out!`);
+    }
+  }
 }
 
 function getSessionUserId(c: any): number | null {
@@ -174,11 +193,35 @@ export function privateRoutes(app: Hono): void {
       if (typeof available !== "boolean") {
         return c.json({ error: "available (boolean) is required" }, 400);
       }
+      const previous = await prisma.user.findUnique({ where: { id: userId } });
       const user = await prisma.user.update({
         where: { id: userId },
         data: { availableForHangout: available },
       });
+      if (available && !previous?.availableForHangout) {
+        notifyFriendsOfAvailability(userId, user.name).catch((e) =>
+          console.error("Failed to notify friends of availability:", e)
+        );
+      }
       return c.json(serializeUser(user));
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return c.json({ error: "Invalid JSON body" }, 400);
+      }
+      return handlePrismaError(c, error);
+    }
+  });
+
+  app.put("/me/fcm-token", async (c) => {
+    const userId = getSessionUserId(c);
+    if (!userId) return c.json({ error: "No linked app user" }, 404);
+    try {
+      const { fcmToken } = await c.req.json<{ fcmToken?: string }>();
+      if (!fcmToken || !fcmToken.trim()) {
+        return c.json({ error: "fcmToken is required" }, 400);
+      }
+      await prisma.user.update({ where: { id: userId }, data: { fcmToken } });
+      return c.json({ ok: true });
     } catch (error) {
       if (error instanceof SyntaxError) {
         return c.json({ error: "Invalid JSON body" }, 400);
