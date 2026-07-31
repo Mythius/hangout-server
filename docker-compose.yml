@@ -12,6 +12,9 @@ services:
       # Bind-mounted so files (e.g. a built APK) can be dropped in and served
       # immediately, without needing to rebuild the image.
       - ./public:/app/public
+      # Secrets (e.g. the Firebase service account key) live only on the
+      # host — never baked into the image or committed to git.
+      - ./secrets:/app/secrets
     depends_on:
       db:
         condition: service_healthy
