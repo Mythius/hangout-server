@@ -15,7 +15,10 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 async function getOrCreateAppUser(email: string, name: string | undefined) {
   return prisma.user.upsert({
     where: { email },
-    update: name ? { name } : {},
+    // Never touch `name` on an existing row — the user may have set their
+    // own display name in Settings, and re-signing in with Google shouldn't
+    // clobber it back to whatever Google has on file.
+    update: {},
     create: { email, name },
   });
 }
@@ -185,6 +188,31 @@ export function privateRoutes(app: Hono): void {
       const user = await prisma.user.update({
         where: { id: userId },
         data: { phoneNumber: normalized },
+      });
+      return c.json(serializeUser(user));
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return c.json({ error: "Invalid JSON body" }, 400);
+      }
+      return handlePrismaError(c, error);
+    }
+  });
+
+  app.put("/me/name", async (c) => {
+    const userId = getSessionUserId(c);
+    if (!userId) return c.json({ error: "No linked app user" }, 404);
+    try {
+      const { name } = await c.req.json<{ name?: string }>();
+      const trimmed = name?.trim();
+      if (!trimmed) {
+        return c.json({ error: "name is required" }, 400);
+      }
+      if (trimmed.length > 60) {
+        return c.json({ error: "name must be 60 characters or fewer" }, 400);
+      }
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: { name: trimmed },
       });
       return c.json(serializeUser(user));
     } catch (error) {
