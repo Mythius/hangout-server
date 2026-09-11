@@ -12,7 +12,7 @@ services:
       # Desktop (Mac/Windows) does, so it's added explicitly here.
       - "host.docker.internal:host-gateway"
     ports:
-      - "3000:80"
+      - "4001:80"
     volumes:
       # Bind-mounted so files (e.g. a built APK) can be dropped in and served
       # immediately, without needing to rebuild the image.
