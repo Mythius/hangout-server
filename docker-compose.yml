@@ -4,8 +4,13 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql://test:test@db:5432/test_db
+      # DATABASE_URL is no longer overridden here — it comes from .env,
+      # pointing at the Postgres instance running on the host machine.
       - REDIS_URL=redis://redis:6379
+    extra_hosts:
+      # Docker on Linux doesn't auto-add this mapping the way Docker
+      # Desktop (Mac/Windows) does, so it's added explicitly here.
+      - "host.docker.internal:host-gateway"
     ports:
       - "3000:80"
     volumes:
@@ -16,8 +21,6 @@ services:
       # host — never baked into the image or committed to git.
       - ./secrets:/app/secrets
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
     restart: always
@@ -35,24 +38,26 @@ services:
       retries: 5
     restart: always
 
-  db:
-    image: postgres:latest
-    environment:
-      - POSTGRES_USER=test
-      - POSTGRES_PASSWORD=test
-      - POSTGRES_DB=test_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U test -d test_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: always
+  # Test-only Postgres container — disabled now that the app connects to a
+  # Postgres instance on the host machine via DATABASE_URL in .env.
+  # db:
+  #   image: postgres:latest
+  #   environment:
+  #     - POSTGRES_USER=test
+  #     - POSTGRES_PASSWORD=test
+  #     - POSTGRES_DB=test_db
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U test -d test_db"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+  #   restart: always
 
 volumes:
-  postgres_data:
+  # postgres_data: — unused now that the db service is disabled
   redis_data:
 
