@@ -28,13 +28,28 @@ async function getOrCreateAppUser(email: string, name: string | undefined) {
 // how a friend typed it in. Best-effort (assumes US/Canada when no country
 // code is given) — good enough for matching within a friend group without
 // pulling in a full phone-number-parsing library.
-function normalizePhoneNumber(raw: string): string {
+//
+// Exported so `tools/backfillPhoneNumbers.ts` can re-normalize phone numbers
+// that were stored before this normalization existed (raw/exact-match rows
+// from before e9a9f13) — matching only works if both sides funnel through
+// the same function, and old rows never got the chance to.
+export function normalizePhoneNumber(raw: string): string {
   const hasPlus = raw.trim().startsWith("+");
   const digits = raw.replace(/\D/g, "");
   if (hasPlus) return "+" + digits;
   if (digits.length === 10) return "+1" + digits;
   if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
   return "+" + digits;
+}
+
+// Looks up a value from the `Config` table (see prisma/schema.prisma) — a
+// flat key/value store for small bits of server-controlled copy the app
+// needs (e.g. `share_text`, the invite message shown when a searched phone
+// number doesn't belong to any user yet). Returns null if the key hasn't
+// been set.
+async function getConfigValue(key: string): Promise<string | null> {
+  const row = await prisma.config.findUnique({ where: { key } });
+  return row?.value ?? null;
 }
 
 // Pushes to every accepted friend who has notifications turned on for this
@@ -371,7 +386,11 @@ export function privateRoutes(app: Hono): void {
         where: { phoneNumber: normalizePhoneNumber(phoneNumber) },
       });
       if (!target) {
-        return c.json({ error: "No user with that phone number" }, 404);
+        const inviteMessage = await getConfigValue("share_text");
+        return c.json(
+          { error: "No user with that phone number", inviteMessage },
+          404,
+        );
       }
       if (target.id === userId) {
         return c.json({ error: "You can't friend yourself" }, 400);
