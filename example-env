@@ -10,3 +10,8 @@ DATABASE_URL=postgresql://test:test@db:5432/test_db
 # configured with this same ID as its google_sign_in `serverClientId`, which is what
 # makes the ID token it produces verifiable here.
 GOOGLE_CLIENT_ID=
+
+# Where this server is publicly reachable. Only used to build absolute profile-picture
+# URLs for push notifications (the receiving phone downloads the image itself, so a
+# relative path won't do). Defaults to https://hangout.msouthwick.com.
+PUBLIC_BASE_URL=https://hangout.msouthwick.com

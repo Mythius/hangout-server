@@ -20,6 +20,9 @@ services:
       # Secrets (e.g. the Firebase service account key) live only on the
       # host — never baked into the image or committed to git.
       - ./secrets:/app/secrets
+      # User uploads (profile pictures) — bind-mounted so they survive an
+      # image rebuild, which would otherwise wipe them with the container.
+      - ./uploads:/app/uploads
     depends_on:
       redis:
         condition: service_healthy

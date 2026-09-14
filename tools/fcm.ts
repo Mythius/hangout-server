@@ -27,10 +27,15 @@ async function getAuth(): Promise<{ auth: GoogleAuth; projectId: string } | null
 // Sends a notification to a single device token. Best-effort: logs and
 // swallows errors (an unreachable/expired token shouldn't break the caller's
 // request, e.g. someone flipping their availability).
+//
+// `imageUrl` must be publicly reachable without auth — the receiving device
+// downloads it itself (FCM only passes the URL along), so a session-gated
+// URL would silently render no image.
 export async function sendPushNotification(
   deviceToken: string,
   title: string,
-  body: string
+  body: string,
+  imageUrl?: string | null
 ): Promise<void> {
   try {
     const ctx = await getAuth();
@@ -52,7 +57,7 @@ export async function sendPushNotification(
         body: JSON.stringify({
           message: {
             token: deviceToken,
-            notification: { title, body },
+            notification: { title, body, ...(imageUrl ? { image: imageUrl } : {}) },
           },
         }),
       }

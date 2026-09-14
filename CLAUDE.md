@@ -55,6 +55,10 @@ The Prisma datasource adapter (`pg` vs `mariadb`) is selected at runtime in `too
 
 **`public/`** is a minimal demo frontend: `index.html` + `api.js` (fetch wrappers for the auth/CRUD endpoints) plus a small library of dependency-free vanilla-JS UI components (`combobox-input.js`, `date-range.js`, `file-drop.js`, `map-picker.js`, `rich-text.js`, `star-rating.js`, `tag-input.js`), demonstrated in `components/demo.html`. This is a reference/demo, not a framework — new frontends aren't required to use it.
 
+**Profile pictures (Hangout-specific, in `api.ts`)**: `PUT /me/avatar` takes a multipart `file`, identifies the format from its **magic bytes** rather than the declared Content-Type (these get served back publicly, so an upload shouldn't get to decide what we serve it as), writes `uploads/avatars/<uuid>.<ext>`, and deletes the previous file. `GET /avatars/:filename` serves them and is deliberately **public** — a phone rendering a push notification downloads the image with no way to authenticate. Filenames are unguessable UUIDs, the route only matches that exact shape (no path traversal), and responses are `immutable`-cached since a new upload always means a new filename. The API returns relative paths (`/avatars/…`) so the app resolves them against whatever backend it's pointed at; only push notifications need the absolute form, built from `PUBLIC_BASE_URL`.
+
+`./uploads` **must stay bind-mounted** in `docker-compose.yml` — it holds real user data, and an image rebuild would otherwise take every profile picture with it.
+
 **Deployment**: `Dockerfile` is a multi-stage Bun build (installs deps, runs `prisma generate` against a placeholder `DATABASE_URL` at build time, then copies into a slim runner image). `docker-compose.yml` runs the app alongside Postgres and Redis containers for local/prod-like use. `entrypoint.sh` is the container's start command.
 
 ## Environment variables

@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { join } from "path";
+import { mkdir, unlink } from "fs/promises";
 import type { Session } from "./tools/auth.ts";
 import { createSession } from "./tools/auth.ts";
 import { exposePrismaCRUD, prisma } from "./tools/prisma.ts";
@@ -7,6 +9,57 @@ import { handlePrismaError, PermissionResult } from "./tools/createCRUD.ts";
 import { sendPushNotification } from "./tools/fcm.ts";
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+
+// Where this server is reachable from the public internet. Only needed to
+// build absolute avatar URLs for push notifications — the receiving device
+// downloads the image itself, so a relative path is useless there. The API
+// hands relative paths to the app, which resolves them against whatever
+// base URL it was pointed at, so local dev works without setting this.
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || "https://hangout.msouthwick.com")
+  .replace(/\/+$/, "");
+
+// ---------------------------------------------------------------------------
+// Profile pictures
+// ---------------------------------------------------------------------------
+// Stored outside ./public (which is bind-mounted for APK distribution) and
+// served by GET /avatars/:filename instead. That route is public rather than
+// session-gated on purpose: Android downloads the image in a push
+// notification itself, with no auth header to give it.
+const AVATARS_DIR = "./uploads/avatars";
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+
+await mkdir(AVATARS_DIR, { recursive: true }).catch(() => {});
+
+const AVATAR_CONTENT_TYPES: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
+
+// Identifies the image format from its magic bytes rather than trusting the
+// upload's declared Content-Type. These files get served back to everyone on
+// a public URL, so a mislabeled upload (e.g. HTML claiming to be a JPEG)
+// shouldn't be able to decide what we serve it as.
+function detectImageExtension(bytes: Uint8Array): string | null {
+  const startsWith = (...sig: number[]) => sig.every((b, i) => bytes[i] === b);
+  if (bytes.length >= 3 && startsWith(0xff, 0xd8, 0xff)) return ".jpg";
+  if (bytes.length >= 8 && startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return ".png";
+  if (
+    bytes.length >= 12 &&
+    startsWith(0x52, 0x49, 0x46, 0x46) && // "RIFF"
+    [0x57, 0x45, 0x42, 0x50].every((b, i) => bytes[8 + i] === b) // "WEBP"
+  ) {
+    return ".webp";
+  }
+  return null;
+}
+
+// The path the app stores/renders, resolved against whichever backend it's
+// pointed at. Absolute form (for push notifications) is built separately
+// with PUBLIC_BASE_URL.
+function avatarPath(filename: string | null): string | null {
+  return filename ? `/avatars/${filename}` : null;
+}
 
 // ---------------------------------------------------------------------------
 // App-user helpers — link a login session (keyed by email) to the app's own
@@ -56,24 +109,29 @@ async function getConfigValue(key: string): Promise<string | null> {
 // user, using their custom availabilityMessage if they've set one (falls
 // back to a sensible default). Best-effort — errors are logged by
 // sendPushNotification itself and never propagate to the caller.
-async function notifyFriendsOfAvailability(
-  userId: number,
-  name: string | null,
-  availabilityMessage: string | null
-): Promise<void> {
-  const body = (availabilityMessage && availabilityMessage.trim())
-    ? availabilityMessage.trim()
-    : `${name ?? "A friend"} is available to hang out!`;
+async function notifyFriendsOfAvailability(user: {
+  id: number;
+  name: string | null;
+  availabilityMessage: string | null;
+  avatarFilename: string | null;
+}): Promise<void> {
+  const body = (user.availabilityMessage && user.availabilityMessage.trim())
+    ? user.availabilityMessage.trim()
+    : `${user.name ?? "A friend"} is available to hang out!`;
+  // Absolute, because the receiving device fetches this itself.
+  const imageUrl = user.avatarFilename
+    ? `${PUBLIC_BASE_URL}${avatarPath(user.avatarFilename)}`
+    : null;
   const friendships = await prisma.friendship.findMany({
-    where: { status: "ACCEPTED", OR: [{ requesterId: userId }, { addresseeId: userId }] },
+    where: { status: "ACCEPTED", OR: [{ requesterId: user.id }, { addresseeId: user.id }] },
     include: { requester: true, addressee: true },
   });
   for (const f of friendships) {
-    const iAmRequester = f.requesterId === userId;
+    const iAmRequester = f.requesterId === user.id;
     const friend = iAmRequester ? f.addressee : f.requester;
     const theyWantToBeNotifiedAboutMe = iAmRequester ? f.addresseeNotify : f.requesterNotify;
     if (theyWantToBeNotifiedAboutMe && friend.fcmToken) {
-      await sendPushNotification(friend.fcmToken, "Hangout", body);
+      await sendPushNotification(friend.fcmToken, "Hangout", body, imageUrl);
     }
   }
 }
@@ -91,6 +149,7 @@ function serializeUser(user: {
   phoneNumber: string | null;
   availableForHangout: boolean;
   availabilityMessage: string | null;
+  avatarFilename: string | null;
 }) {
   return {
     id: user.id,
@@ -99,11 +158,35 @@ function serializeUser(user: {
     phoneNumber: user.phoneNumber,
     availableForHangout: user.availableForHangout,
     availabilityMessage: user.availabilityMessage,
+    avatarUrl: avatarPath(user.avatarFilename),
   };
 }
 
 export function publicRoutes(app: Hono): void {
   app.get("/hello", (c) => c.json({ message: "Hello World" }));
+
+  // Profile pictures. Public (no session) because a device rendering a push
+  // notification downloads the image with no way to authenticate — see
+  // AVATARS_DIR above. Filenames are unguessable UUIDs.
+  app.get("/avatars/:filename", async (c) => {
+    const filename = c.req.param("filename");
+    // Only ever match the shape we generate — no slashes or dots to walk out
+    // of the avatars directory with.
+    const match = /^[0-9a-f-]{36}(\.jpg|\.png|\.webp)$/.exec(filename);
+    if (!match) return c.json({ error: "Not found" }, 404);
+
+    const file = Bun.file(join(AVATARS_DIR, filename));
+    if (!(await file.exists())) return c.json({ error: "Not found" }, 404);
+
+    return new Response(file, {
+      headers: {
+        "Content-Type": AVATAR_CONTENT_TYPES[match[1]!]!,
+        // A new upload always gets a new filename, so these bytes never
+        // change — worth caching hard on devices and in notification trays.
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
+  });
 
   app.post("/file-upload", async (c) => {
     const result = await handleFileUpload(c);
@@ -252,7 +335,7 @@ export function privateRoutes(app: Hono): void {
         data: { availableForHangout: available },
       });
       if (available && !previous?.availableForHangout) {
-        notifyFriendsOfAvailability(userId, user.name, user.availabilityMessage).catch((e) =>
+        notifyFriendsOfAvailability(user).catch((e) =>
           console.error("Failed to notify friends of availability:", e)
         );
       }
@@ -279,6 +362,55 @@ export function privateRoutes(app: Hono): void {
       if (error instanceof SyntaxError) {
         return c.json({ error: "Invalid JSON body" }, 400);
       }
+      return handlePrismaError(c, error);
+    }
+  });
+
+  // Profile picture upload — multipart/form-data with a `file` field. The
+  // app crops and downscales before sending, so there's no server-side image
+  // processing here, just format/size validation.
+  app.put("/me/avatar", async (c) => {
+    const userId = getSessionUserId(c);
+    if (!userId) return c.json({ error: "No linked app user" }, 404);
+    try {
+      const formData = await c.req.formData();
+      const file = formData.get("file");
+      if (!(file instanceof File)) {
+        return c.json(
+          { error: "No file provided. Send a multipart/form-data request with a 'file' field." },
+          400,
+        );
+      }
+      if (file.size > MAX_AVATAR_BYTES) {
+        return c.json({ error: "Image is too large (5 MB max)" }, 400);
+      }
+
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const ext = detectImageExtension(bytes);
+      if (!ext) {
+        return c.json({ error: "Unsupported image format — use JPEG, PNG, or WebP" }, 400);
+      }
+
+      const previous = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { avatarFilename: true },
+      });
+
+      // New random filename per upload, so the old URL is never reused and
+      // the immutable caching on GET /avatars/:filename stays honest.
+      const filename = `${crypto.randomUUID()}${ext}`;
+      await Bun.write(join(AVATARS_DIR, filename), bytes);
+
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: { avatarFilename: filename },
+      });
+
+      if (previous?.avatarFilename) {
+        await unlink(join(AVATARS_DIR, previous.avatarFilename)).catch(() => {});
+      }
+      return c.json(serializeUser(user));
+    } catch (error) {
       return handlePrismaError(c, error);
     }
   });
@@ -331,6 +463,7 @@ export function privateRoutes(app: Hono): void {
         email: friend.email,
         phoneNumber: friend.phoneNumber,
         availableForHangout: friend.availableForHangout,
+        avatarUrl: avatarPath(friend.avatarFilename),
         notify,
       };
     });
@@ -358,6 +491,7 @@ export function privateRoutes(app: Hono): void {
         name: f.requester.name,
         email: f.requester.email,
         phoneNumber: f.requester.phoneNumber,
+        avatarUrl: avatarPath(f.requester.avatarFilename),
         createdAt: f.createdAt,
       }));
     const outgoing = pending
@@ -368,6 +502,7 @@ export function privateRoutes(app: Hono): void {
         name: f.addressee.name,
         email: f.addressee.email,
         phoneNumber: f.addressee.phoneNumber,
+        avatarUrl: avatarPath(f.addressee.avatarFilename),
         createdAt: f.createdAt,
       }));
 

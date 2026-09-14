@@ -18,6 +18,7 @@ model User {
   availableForPublicHangout Boolean      @default(false)
   fcmToken                  String?
   availabilityMessage       String?
+  avatarFilename            String?
   sentFriendRequests        Friendship[] @relation("FriendshipRequester")
   receivedFriendRequests    Friendship[] @relation("FriendshipAddressee")
 }
